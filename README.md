@@ -14,32 +14,19 @@ Extract inline comments with the exact text they were attached to.
 
 <br />
 
-<img src="./assets/hero.png" alt="Notion page with highlighted comments being extracted to structured data" width="640" />
+<img src="./assets/hero.png" alt="Notion page → notion-inline-comments → structured data" width="600" />
 
 </div>
 
 ---
 
-## Why?
+## The Problem
 
-When you highlight text in Notion and add a comment, Notion knows *exactly* which words you selected.
-
-**But the official API doesn't give you that information.**
+When you highlight text in Notion and add a comment, Notion knows *exactly* which words you selected — **but the official API doesn't give you that information.**
 
 ```diff
-  Official API response:
-  ✅ comment:  "This is a key design decision..."
-  ✅ block:    "abc123..."
-- ❌ selected: ???
-```
-
-This package gets it back:
-
-```diff
-  notion-inline-comments:
-  ✅ comment:  "This is a key design decision..."
-  ✅ block:    "abc123..."
-+ ✅ selected: "design tokens"  ← the exact highlighted text
+- Official API:  comment ✅  block ✅  selected text ❌
++ This package:  comment ✅  block ✅  selected text ✅
 ```
 
 ---
@@ -52,95 +39,74 @@ npm install notion-inline-comments
 
 ## Usage
 
-**3 lines is all you need:**
-
 ```javascript
 import { fetchInlineComments } from 'notion-inline-comments';
 
 const { comments } = await fetchInlineComments({
-  pageId: 'your-page-id',      // from the Notion URL
-  apiKey: 'secret_xxx',         // from notion.so/my-integrations
+  pageId: 'your-page-id',
+  apiKey: 'secret_xxx',
 });
 
-// That's it. Each comment now has .contextText
 comments.forEach(c => {
-  console.log(c.contextText);   // "design tokens"  ← highlighted text
-  console.log(c.text);          // "These define..." ← comment body
+  console.log(c.contextText);  // "design tokens"  ← highlighted text
+  console.log(c.text);         // "These define..." ← comment body
 });
 ```
 
-### Real-World Example
+### Real-World Use Case
 
-Use it to render Notion comments as hover tooltips — each mapped to the exact source text:
+Render Notion comments as hover tooltips — each on the exact text they were attached to:
 
 <div align="center">
-<img src="./assets/demo-tooltip.png" alt="Hover tooltip showing Notion comment on the exact highlighted text" width="640" />
-<br />
-<em>Hover on "literary salon" → shows only that comment's content</em>
+<img src="./assets/demo-tooltip.png" alt="Hover tooltip on highlighted text" width="480" />
 </div>
 
 ---
 
 ## How It Works
 
-```
-  Official Notion API              Unofficial Internal API
-  ─────────────────────            ──────────────────────────
-  "This is a key decision..."      discussion.context:
-   + discussionId: abc-123          "design tokens"
-   + blockId: def-456               + discussionId: abc-123
-         │                                │
-         └────────── merge by ID ─────────┘
-                        │
-                        ▼
-              ┌─────────────────────────────┐
-              │  contextText: "design tokens"│
-              │  text: "This is a key        │
-              │        design decision..."   │
-              └─────────────────────────────┘
-```
+<div align="center">
+<img src="./assets/how-it-works.png" alt="3-step flow: Official API + Internal API → Merge" width="560" />
+</div>
 
-The Notion web app uses an internal endpoint (`/api/v3/loadPageChunk`) that returns `discussion` objects, each with a `context` field containing the selected text. We merge this with official API data using `discussionId`.
+<br />
+
+> The Notion web app uses an internal endpoint that returns `discussion` objects with a `context` field — the exact selected text. We merge this with official API data using `discussionId`.
 
 ---
 
-## API Reference
+## API
 
-### `fetchInlineComments(options)` → `Promise<Result>`
+### `fetchInlineComments({ pageId, apiKey, tokenV2? })`
 
-| Option | Type | Required | Description |
-|--------|------|:--------:|-------------|
-| `pageId` | `string` | ✅ | Page ID from the Notion URL |
-| `apiKey` | `string` | ✅ | Integration token from [notion.so/my-integrations](https://notion.so/my-integrations) |
-| `tokenV2` | `string` | | Browser cookie for private pages |
+| Option | Required | Description |
+|--------|:--------:|-------------|
+| `pageId` | ✅ | Page ID from the Notion URL |
+| `apiKey` | ✅ | Integration token |
+| `tokenV2` | | Browser cookie (private pages only) |
 
-**Result:**
+**Returns:**
 
 ```typescript
 {
   comments: [{
-    contextText: string | null,  // highlighted text (null if unmapped)
+    contextText: string | null,  // highlighted text
     text: string,                // comment body
-    author: string,              // who wrote it
+    author: string,
     blockId: string,
     discussionId: string,
-    createdAt: string,           // ISO 8601
+    createdAt: string,
   }],
-  mapped: number,  // comments with contextText
-  total: number,   // all comments
+  mapped: number,
+  total: number,
 }
 ```
 
 ### Helpers
 
 ```javascript
-import { groupByBlock, groupByContext } from 'notion-inline-comments';
-
-// Group by block
-groupByBlock(comments);   // { "block-1": [...], "block-2": [...] }
-
-// Group by highlighted text
-groupByContext(comments);  // Map { "design tokens" => [...] }
+groupByBlock(comments);    // { blockId: [comments] }
+groupByContext(comments);  // Map { "text" => [comments] }
 ```
 
 ---
@@ -148,9 +114,9 @@ groupByContext(comments);  // Map { "design tokens" => [...] }
 ## Requirements
 
 - **Node.js** ≥ 18
-- A [Notion Integration](https://www.notion.so/my-integrations) with access to the page
+- A [Notion Integration](https://www.notion.so/my-integrations) with page access
 
-> **Note:** This package uses [`notion-client`](https://github.com/NotionX/react-notion-x) (unofficial API) for discussion context. Internal APIs can change without notice.
+> **Note:** Uses [`notion-client`](https://github.com/NotionX/react-notion-x) (unofficial) for discussion context. Internal APIs can change without notice.
 
 ---
 
