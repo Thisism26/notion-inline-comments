@@ -1,20 +1,21 @@
 /**
  * notion-inline-comments
  * 
- * 노션의 공식 API와 비공식 API를 조합하여
- * 인라인 댓글이 정확히 어떤 텍스트에 달렸는지 매핑합니다.
+ * Combines Notion's official API with its internal API to map
+ * inline comments to the exact text they were attached to.
  * 
- * 공식 API만으로는 "어떤 텍스트를 선택해서 댓글을 달았는지" 알 수 없습니다.
- * 이 패키지는 비공식 API(notion-client)의 discussion.context 필드를 활용하여
- * 댓글 ↔ 텍스트 1:1 매핑을 제공합니다.
+ * The official API alone cannot tell you "which text was selected
+ * when a comment was created." This package uses the discussion.context
+ * field from the internal API (via notion-client) to provide
+ * a 1:1 comment ↔ text mapping.
  */
 
 import { Client } from '@notionhq/client';
 
-// ─── Official API: 댓글 수집 ──────────────────────────
+// ─── Official API: collect comments ────────────────────
 
 /**
- * 페이지의 모든 블록을 순회하며 댓글을 수집합니다.
+ * Walks all blocks in a page and collects their comments.
  */
 async function fetchOfficialComments(notion, pageId) {
   const comments = [];
@@ -29,6 +30,7 @@ async function fetchOfficialComments(notion, pageId) {
       });
 
       for (const block of res.results) {
+        // Fetch comments for each block
         try {
           let commentCursor;
           do {
@@ -49,9 +51,10 @@ async function fetchOfficialComments(notion, pageId) {
             commentCursor = cRes.has_more ? cRes.next_cursor : null;
           } while (commentCursor);
         } catch {
-          // 댓글 조회 실패 시 무시
+          // Ignore blocks that don't support comments
         }
 
+        // Recurse into child blocks
         if (block.has_children) {
           await walkBlocks(block.id);
         }
@@ -65,10 +68,11 @@ async function fetchOfficialComments(notion, pageId) {
   return comments;
 }
 
-// ─── Unofficial API: discussion 전체 데이터 ──────────────
+// ─── Internal API: discussion metadata ─────────────────
 
 /**
- * 비공식 API를 통해 각 discussion의 전체 메타데이터를 가져옵니다.
+ * Fetches full discussion metadata via the internal API,
+ * including context (selected text), highlight color, and resolved status.
  */
 async function fetchDiscussionData(pageId, options = {}) {
   const { NotionAPI } = await import('notion-client');
@@ -87,12 +91,12 @@ async function fetchDiscussionData(pageId, options = {}) {
     const v = d.value?.value;
     if (!v?.id) continue;
 
-    // context 텍스트 추출
+    // Extract context text from annotation array
     const contextText = v.context
       ? v.context.map(c => c[0]).join('')
       : null;
 
-    // 하이라이트 색상 추출 (annotation "h" = highlight)
+    // Extract highlight color from annotation "h" (highlight)
     let highlightColor = null;
     if (v.context?.[0]?.[1]) {
       for (const ann of v.context[0][1]) {
@@ -117,13 +121,13 @@ async function fetchDiscussionData(pageId, options = {}) {
 // ─── Public API ───────────────────────────────────────
 
 /**
- * 노션 페이지의 인라인 댓글을 정확한 텍스트 매핑과 함께 가져옵니다.
+ * Fetches inline comments from a Notion page with exact text mapping.
  * 
  * @param {Object} options
- * @param {string} options.pageId - 노션 페이지 ID
- * @param {string} options.apiKey - 노션 공식 API 키 (Integration token)
- * @param {string} [options.tokenV2] - 노션 브라우저 token_v2 (비공개 페이지용)
- * @param {boolean} [options.includeResolved=false] - 해결된 댓글도 포함할지
+ * @param {string} options.pageId - Notion page ID
+ * @param {string} options.apiKey - Notion Integration API key
+ * @param {string} [options.tokenV2] - Browser token_v2 cookie (for private pages)
+ * @param {boolean} [options.includeResolved=false] - Include resolved comments
  * @returns {Promise<InlineCommentResult>}
  * 
  * @example
@@ -135,19 +139,12 @@ async function fetchDiscussionData(pageId, options = {}) {
  *   apiKey: process.env.NOTION_API_KEY,
  * });
  * 
- * console.log(result.comments);
- * // [
- * //   {
- * //     contextText: "design tokens",
- * //     text: "These define the visual foundation...",
- * //     author: "John",
- * //     highlightColor: "yellow_background",
- * //     resolved: false,
- * //     blockId: "abc123-...",
- * //     discussionId: "def456-...",
- * //   },
- * //   ...
- * // ]
+ * result.comments.forEach(c => {
+ *   console.log(c.contextText);     // "design tokens"
+ *   console.log(c.text);            // "These define the visual foundation..."
+ *   console.log(c.highlightColor);  // "yellow_background"
+ *   console.log(c.resolved);        // false
+ * });
  * ```
  */
 export async function fetchInlineComments({ pageId, apiKey, tokenV2, includeResolved = false }) {
@@ -156,22 +153,22 @@ export async function fetchInlineComments({ pageId, apiKey, tokenV2, includeReso
 
   const notion = new Client({ auth: apiKey });
 
-  // 1. 공식 API로 댓글 수집
+  // Step 1: Collect comments via official API
   const rawComments = await fetchOfficialComments(notion, pageId);
 
   if (rawComments.length === 0) {
     return { comments: [], discussions: [], mapped: 0, total: 0 };
   }
 
-  // 2. 비공식 API로 discussion 전체 데이터 수집
+  // Step 2: Fetch discussion metadata via internal API
   let discussionMap = {};
   try {
     discussionMap = await fetchDiscussionData(pageId, { token: tokenV2 });
   } catch (err) {
-    console.warn(`[notion-inline-comments] Discussion data fetch failed: ${err.message}`);
+    console.warn(`[notion-inline-comments] Failed to fetch discussion data: ${err.message}`);
   }
 
-  // 3. discussionId로 합치기
+  // Step 3: Merge by discussionId
   const comments = rawComments.map(c => {
     const disc = discussionMap[c.discussionId] || {};
     return {
@@ -187,14 +184,14 @@ export async function fetchInlineComments({ pageId, apiKey, tokenV2, includeReso
     };
   });
 
-  // resolved 필터링
+  // Filter by resolved status
   const filtered = includeResolved
     ? comments
     : comments.filter(c => !c.resolved);
 
   const mapped = filtered.filter(c => c.contextText !== null).length;
 
-  // 4. discussion 단위로 그룹핑 (스레드)
+  // Step 4: Group into discussion threads
   const threadMap = {};
   for (const c of filtered) {
     if (!threadMap[c.discussionId]) {
@@ -218,14 +215,14 @@ export async function fetchInlineComments({ pageId, apiKey, tokenV2, includeReso
 
   return {
     comments: filtered,
-    discussions,   // 스레드 단위로 그룹핑된 데이터
+    discussions,
     mapped,
     total: filtered.length,
   };
 }
 
 /**
- * 댓글 목록을 blockId별로 그룹핑합니다.
+ * Group comments by blockId.
  */
 export function groupByBlock(comments) {
   const map = {};
@@ -238,7 +235,7 @@ export function groupByBlock(comments) {
 }
 
 /**
- * 댓글 목록을 contextText별로 그룹핑합니다.
+ * Group comments by contextText.
  */
 export function groupByContext(comments) {
   const map = new Map();
@@ -251,21 +248,21 @@ export function groupByContext(comments) {
 }
 
 /**
- * 해결된 댓글만 필터링합니다.
+ * Filter to resolved comments only.
  */
 export function filterResolved(comments) {
   return comments.filter(c => c.resolved);
 }
 
 /**
- * 미해결 댓글만 필터링합니다.
+ * Filter to unresolved comments only.
  */
 export function filterUnresolved(comments) {
   return comments.filter(c => !c.resolved);
 }
 
 /**
- * 하이라이트 색상별로 그룹핑합니다.
+ * Group comments by highlight color.
  */
 export function groupByHighlight(comments) {
   const map = {};

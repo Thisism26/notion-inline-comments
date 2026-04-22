@@ -1,36 +1,36 @@
 export interface InlineComment {
-  /** 사용자가 드래그한 정확한 텍스트. null이면 context 매핑 실패 */
+  /** The exact text the user highlighted. null if context mapping failed */
   contextText: string | null;
-  /** 댓글 내용 */
+  /** Comment body */
   text: string;
-  /** 작성자 이름 */
+  /** Author display name */
   author: string;
-  /** 노션 하이라이트 색상 (e.g. "yellow_background"). null이면 하이라이트 없음 */
+  /** Notion highlight color (e.g. "yellow_background"). null if none */
   highlightColor: string | null;
-  /** 댓글 해결 여부 */
+  /** Whether the discussion thread is resolved */
   resolved: boolean;
-  /** 댓글이 달린 블록 ID */
+  /** Block ID the comment belongs to */
   blockId: string;
-  /** discussion ID */
+  /** Discussion thread ID */
   discussionId: string;
-  /** 개별 댓글 ID */
+  /** Individual comment ID */
   commentId: string;
-  /** 댓글 작성 시각 (ISO 8601) */
+  /** Comment creation time (ISO 8601) */
   createdAt: string;
 }
 
 export interface DiscussionThread {
-  /** discussion ID */
+  /** Discussion thread ID */
   discussionId: string;
-  /** 선택 텍스트 */
+  /** The exact text the user highlighted */
   contextText: string | null;
-  /** 하이라이트 색상 */
+  /** Notion highlight color */
   highlightColor: string | null;
-  /** 해결 여부 */
+  /** Whether this thread is resolved */
   resolved: boolean;
-  /** 블록 ID */
+  /** Block ID */
   blockId: string;
-  /** 이 스레드의 모든 댓글 */
+  /** All replies in this thread */
   comments: {
     commentId: string;
     text: string;
@@ -40,30 +40,36 @@ export interface DiscussionThread {
 }
 
 export interface InlineCommentResult {
-  /** 모든 인라인 댓글 (flat) */
+  /** All inline comments (flat list) */
   comments: InlineComment[];
-  /** 스레드 단위로 그룹핑된 데이터 */
+  /** Comments grouped by discussion thread */
   discussions: DiscussionThread[];
-  /** context 매핑에 성공한 댓글 수 */
+  /** Number of comments with successful text mapping */
   mapped: number;
-  /** 전체 댓글 수 */
+  /** Total comment count */
   total: number;
 }
 
 export interface FetchOptions {
-  /** 노션 페이지 ID */
+  /** Notion page ID */
   pageId: string;
-  /** 노션 공식 API 키 */
+  /** Notion Integration API key */
   apiKey: string;
-  /** 노션 브라우저 token_v2 (비공개 페이지용) */
+  /** Browser token_v2 cookie (for private pages) */
   tokenV2?: string;
-  /** 해결된 댓글도 포함할지 (기본: false) */
+  /** Include resolved comments (default: false) */
   includeResolved?: boolean;
 }
 
+/** Fetch inline comments with exact text mapping */
 export function fetchInlineComments(options: FetchOptions): Promise<InlineCommentResult>;
+/** Group comments by block ID */
 export function groupByBlock(comments: InlineComment[]): Record<string, InlineComment[]>;
+/** Group comments by context text */
 export function groupByContext(comments: InlineComment[]): Map<string, InlineComment[]>;
+/** Filter to resolved comments only */
 export function filterResolved(comments: InlineComment[]): InlineComment[];
+/** Filter to unresolved comments only */
 export function filterUnresolved(comments: InlineComment[]): InlineComment[];
+/** Group comments by highlight color */
 export function groupByHighlight(comments: InlineComment[]): Record<string, InlineComment[]>;
