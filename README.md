@@ -1,118 +1,178 @@
+<div align="center">
+
+# 💬 notion-inline-comments
+
+**The missing piece of Notion's API.**
+
+Extract inline comments with the exact text they were attached to.
+
+[![npm version](https://img.shields.io/npm/v/notion-inline-comments?color=cb3837&label=npm&logo=npm&logoColor=white)](https://www.npmjs.com/package/notion-inline-comments)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
+
 [🇰🇷 한국어](./README.ko.md)
 
-# notion-inline-comments
+</div>
 
-> Extract Notion inline comments with **exact text mapping**.
-> Know exactly which text was selected when a comment was made.
+---
 
-## The Problem
+## Why?
 
-Notion's official API gives you comments but **doesn't tell you which text was selected** when the comment was created:
+When you highlight text in Notion and leave a comment, Notion knows *exactly* which text you selected.
 
-```
-Official API returns:
-  ✅ Comment text: "This defines the visual foundation..."
-  ✅ Block ID: "abc123-..."
-  ❌ Selected text: ??? (unknown)
-```
+But the official API **throws that information away**:
 
-This package solves that by combining the official API with Notion's internal API:
-
-```
-notion-inline-comments returns:
-  ✅ Comment text: "This defines the visual foundation..."
-  ✅ Block ID: "abc123-..."
-  ✅ Selected text: "design tokens"  ← the exact text the user highlighted
+```diff
+  Official API response:
+  ✅ comment:  "This is a key design decision..."
+  ✅ block:    "abc123..."
+- ❌ selected: ???
 ```
 
-## Install
+This package gets it back:
+
+```diff
+  notion-inline-comments:
+  ✅ comment:  "This is a key design decision..."
+  ✅ block:    "abc123..."
++ ✅ selected: "design tokens"  ← the exact highlighted text
+```
+
+## How?
+
+```
+  Official Notion API              Unofficial Internal API
+  ─────────────────────            ──────────────────────────
+  "This is a key decision..."      discussion.context:
+   + discussionId: abc-123          "design tokens"
+   + blockId: def-456               + discussionId: abc-123
+         │                                │
+         └────────── merge by ID ─────────┘
+                        │
+                        ▼
+              ┌─────────────────────┐
+              │ "design tokens"     │
+              │  → "This is a key   │
+              │    design decision" │
+              └─────────────────────┘
+```
+
+The Notion web app uses an internal API endpoint (`/api/v3/loadPageChunk`) that returns `discussion` objects — each containing a `context` field with the **exact selected text**. We merge this with official API comment data using `discussionId` as the key.
+
+---
+
+## Quick Start
 
 ```bash
 npm install notion-inline-comments
 ```
 
-## Usage
-
 ```javascript
 import { fetchInlineComments } from 'notion-inline-comments';
 
-const result = await fetchInlineComments({
+const { comments, mapped, total } = await fetchInlineComments({
   pageId: 'your-notion-page-id',
   apiKey: process.env.NOTION_API_KEY,
 });
 
-console.log(`${result.mapped}/${result.total} comments mapped to exact text`);
+console.log(`✅ ${mapped}/${total} comments mapped`);
 
-for (const comment of result.comments) {
-  console.log(`"${comment.contextText}" → "${comment.text}"`);
+for (const c of comments) {
+  console.log(`"${c.contextText}" → "${c.text}"`);
 }
 ```
 
-Output:
-
 ```
-3/3 comments mapped to exact text
-"design tokens" → "These define the visual foundation..."
-"warm neutral palette" → "All colors maintain a warm tone..."
-"responsive layout" → "Consider mobile-first breakpoints..."
+✅ 3/3 comments mapped
+"design tokens"        → "These define the visual foundation..."
+"warm neutral palette" → "All colors should maintain warmth..."
+"responsive layout"    → "Consider mobile-first breakpoints..."
 ```
 
-## How It Works
-
-```
-1. Official API  →  Comment text + discussionId
-2. Unofficial API (notion-client)  →  discussion.context (selected text)
-3. Merge by discussionId  →  exact 1:1 text ↔ comment mapping
-```
-
-The unofficial Notion API (`/api/v3/loadPageChunk`) returns a `discussion` object for each comment thread. This object contains a `context` field with the **exact text that was selected** when the comment was created — data the official API doesn't expose.
+---
 
 ## API
 
 ### `fetchInlineComments(options)`
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `pageId` | `string` | ✅ | Notion page ID |
-| `apiKey` | `string` | ✅ | Notion Integration API key |
-| `tokenV2` | `string` | | Browser token_v2 cookie (for private pages) |
+The main function. Fetches all inline comments from a Notion page with text mapping.
 
-Returns `Promise<InlineCommentResult>`:
+```typescript
+const result = await fetchInlineComments({
+  pageId: string,    // Notion page ID (required)
+  apiKey: string,    // Integration API key (required)
+  tokenV2?: string,  // Browser cookie for private pages (optional)
+});
+```
+
+**Returns:**
 
 ```typescript
 {
-  comments: InlineComment[];  // All comments with text mapping
-  mapped: number;             // Comments successfully mapped to text
-  total: number;              // Total comment count
+  comments: InlineComment[],
+  mapped: number,   // how many comments have contextText
+  total: number,    // total comments found
 }
 ```
 
-Each `InlineComment`:
+**`InlineComment`:**
 
-```typescript
-{
-  contextText: string | null; // Exact text that was highlighted (null if mapping failed)
-  text: string;               // Comment content
-  author: string;             // Author name
-  blockId: string;            // Block the comment was made on
-  discussionId: string;       // Discussion ID
-  createdAt: string;          // ISO 8601 timestamp
-}
+| Field | Type | Description |
+|-------|------|-------------|
+| `contextText` | `string \| null` | The exact highlighted text. `null` if mapping failed |
+| `text` | `string` | The comment body |
+| `author` | `string` | Who wrote it |
+| `blockId` | `string` | Which block it belongs to |
+| `discussionId` | `string` | Links official ↔ internal API data |
+| `createdAt` | `string` | ISO 8601 timestamp |
+
+---
+
+### Helpers
+
+#### `groupByBlock(comments)`
+
+```javascript
+import { groupByBlock } from 'notion-inline-comments';
+
+const blocks = groupByBlock(result.comments);
+// { "block-1": [comment, comment], "block-2": [comment] }
 ```
 
-### `groupByBlock(comments)`
+#### `groupByContext(comments)`
 
-Group comments by `blockId`.
+```javascript
+import { groupByContext } from 'notion-inline-comments';
 
-### `groupByContext(comments)`
+const contexts = groupByContext(result.comments);
+// Map { "design tokens" => [comment], "layout" => [comment] }
+```
 
-Group comments by `contextText` (useful when rendering tooltips per highlighted text).
+---
+
+## Use Cases
+
+**🎨 Portfolio / Blog** — Show Notion comments as hover tooltips on the exact text they reference
+
+**📝 Documentation** — Extract annotation context for review workflows
+
+**🔍 Content Analysis** — Map feedback to specific phrases in your writing
+
+---
 
 ## Requirements
 
-- Node.js >= 18
-- A Notion Integration with access to the target page
+- **Node.js** ≥ 18
+- A [Notion Integration](https://www.notion.so/my-integrations) with page access
 
-## License
+## Limitations
 
-MIT
+> This package uses [`notion-client`](https://github.com/NotionX/react-notion-x) (unofficial API) to access discussion context data. While widely used and actively maintained, internal APIs can change without notice.
+
+---
+
+<div align="center">
+
+MIT © [Thisism26](https://github.com/Thisism26)
+
+</div>
