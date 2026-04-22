@@ -12,10 +12,35 @@
 
 import { Client } from '@notionhq/client';
 
+// ─── Rate-limited fetch wrapper ────────────────────────
+
+/**
+ * Retries a function on 429 (rate limit) errors with exponential backoff.
+ */
+async function withRetry(fn, { maxRetries = 3, baseDelay = 1000 } = {}) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isRateLimit = err?.status === 429 || err?.code === 'rate_limited';
+      if (!isRateLimit || attempt === maxRetries) throw err;
+
+      const retryAfter = err?.headers?.['retry-after'];
+      const delay = retryAfter
+        ? parseInt(retryAfter, 10) * 1000
+        : baseDelay * Math.pow(2, attempt);
+
+      console.warn(`[notion-inline-comments] Rate limited, retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
 // ─── Official API: collect comments ────────────────────
 
 /**
  * Walks all blocks in a page and collects their comments.
+ * Handles rate limiting automatically.
  */
 async function fetchOfficialComments(notion, pageId) {
   const comments = [];
@@ -23,21 +48,25 @@ async function fetchOfficialComments(notion, pageId) {
   async function walkBlocks(parentId) {
     let cursor;
     do {
-      const res = await notion.blocks.children.list({
-        block_id: parentId,
-        start_cursor: cursor,
-        page_size: 100,
-      });
+      const res = await withRetry(() =>
+        notion.blocks.children.list({
+          block_id: parentId,
+          start_cursor: cursor,
+          page_size: 100,
+        })
+      );
 
       for (const block of res.results) {
         // Fetch comments for each block
         try {
           let commentCursor;
           do {
-            const cRes = await notion.comments.list({
-              block_id: block.id,
-              start_cursor: commentCursor,
-            });
+            const cRes = await withRetry(() =>
+              notion.comments.list({
+                block_id: block.id,
+                start_cursor: commentCursor,
+              })
+            );
             for (const c of cRes.results) {
               comments.push({
                 blockId: block.id,
@@ -122,6 +151,8 @@ async function fetchDiscussionData(pageId, options = {}) {
 
 /**
  * Fetches inline comments from a Notion page with exact text mapping.
+ * Both API calls run in parallel for faster execution.
+ * Rate limiting is handled automatically with exponential backoff.
  * 
  * @param {Object} options
  * @param {string} options.pageId - Notion page ID
@@ -153,22 +184,20 @@ export async function fetchInlineComments({ pageId, apiKey, tokenV2, includeReso
 
   const notion = new Client({ auth: apiKey });
 
-  // Step 1: Collect comments via official API
-  const rawComments = await fetchOfficialComments(notion, pageId);
+  // Run both API calls in parallel
+  const [rawComments, discussionMap] = await Promise.all([
+    fetchOfficialComments(notion, pageId),
+    fetchDiscussionData(pageId, { token: tokenV2 }).catch(err => {
+      console.warn(`[notion-inline-comments] Failed to fetch discussion data: ${err.message}`);
+      return {};
+    }),
+  ]);
 
   if (rawComments.length === 0) {
     return { comments: [], discussions: [], mapped: 0, total: 0 };
   }
 
-  // Step 2: Fetch discussion metadata via internal API
-  let discussionMap = {};
-  try {
-    discussionMap = await fetchDiscussionData(pageId, { token: tokenV2 });
-  } catch (err) {
-    console.warn(`[notion-inline-comments] Failed to fetch discussion data: ${err.message}`);
-  }
-
-  // Step 3: Merge by discussionId
+  // Merge by discussionId
   const comments = rawComments.map(c => {
     const disc = discussionMap[c.discussionId] || {};
     return {
@@ -191,7 +220,7 @@ export async function fetchInlineComments({ pageId, apiKey, tokenV2, includeReso
 
   const mapped = filtered.filter(c => c.contextText !== null).length;
 
-  // Step 4: Group into discussion threads
+  // Group into discussion threads
   const threadMap = {};
   for (const c of filtered) {
     if (!threadMap[c.discussionId]) {
