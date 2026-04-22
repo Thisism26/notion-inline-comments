@@ -1,0 +1,50 @@
+{
+  "name": "notion-inline-comments",
+  "version": "0.1.0",
+  "description": "Extract Notion inline comments with exact text mapping. Know exactly which text was selected when a comment was made.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node --test test/index.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "notion",
+    "comments",
+    "inline-comments",
+    "annotations",
+    "notion-api",
+    "discussion",
+    "context"
+  ],
+  "author": "Thisism26",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Thisism26/notion-inline-comments"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.2.0",
+    "notion-client": "^6.16.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "dotenv": "^17.4.2"
+  }
+}
