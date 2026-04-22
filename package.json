@@ -22,7 +22,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "node scripts/build.js",
+    "build": "tsc",
     "test": "node --test test/index.test.js",
     "prepublishOnly": "npm run build"
   },
@@ -49,6 +49,8 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "dotenv": "^17.4.2"
+    "@types/node": "^25.6.0",
+    "dotenv": "^17.4.2",
+    "typescript": "^6.0.3"
   }
 }
