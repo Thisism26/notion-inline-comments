@@ -124,6 +124,7 @@ npx notion-inline-comments <db-id> --database --api-key secret_xxx
 | `apiKey` | ✅ | Integration token |
 | `tokenV2` | | Browser cookie (private pages only) |
 | `includeResolved` | | Include resolved comments (default: `false`) |
+| `silent` | | Suppress console warnings (default: `false`) |
 
 ### `fetchFromDatabase(options)`
 
@@ -133,6 +134,7 @@ npx notion-inline-comments <db-id> --database --api-key secret_xxx
 | `apiKey` | ✅ | Integration token |
 | `tokenV2` | | Browser cookie |
 | `limit` | | Max pages to scan |
+| `silent` | | Suppress console warnings |
 
 ### `InlineComment`
 

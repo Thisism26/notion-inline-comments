@@ -59,6 +59,8 @@ export interface FetchOptions {
   apiKey: string;
   tokenV2?: string;
   includeResolved?: boolean;
+  /** Suppress console warnings */
+  silent?: boolean;
 }
 
 export interface DatabaseFetchOptions {
@@ -66,6 +68,8 @@ export interface DatabaseFetchOptions {
   apiKey: string;
   tokenV2?: string;
   includeResolved?: boolean;
+  /** Suppress console warnings */
+  silent?: boolean;
   /** Max pages to scan (default: all) */
   limit?: number;
 }
@@ -102,7 +106,7 @@ interface DiscussionMeta {
 
 async function withRetry<T>(
   fn: () => Promise<T>,
-  { maxRetries = 3, baseDelay = 1000 } = {}
+  { maxRetries = 3, baseDelay = 1000, silent = false } = {}
 ): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -116,7 +120,7 @@ async function withRetry<T>(
         ? parseInt(retryAfter, 10) * 1000
         : baseDelay * Math.pow(2, attempt);
 
-      console.warn(`[notion-inline-comments] Rate limited, retrying in ${delay}ms...`);
+      if (!silent) console.warn(`[notion-inline-comments] Rate limited, retrying in ${delay}ms...`);
       await new Promise(r => setTimeout(r, delay));
     }
   }
@@ -127,7 +131,8 @@ async function withRetry<T>(
 
 async function fetchOfficialComments(
   notion: Client,
-  pageId: string
+  pageId: string,
+  silent: boolean = false
 ): Promise<{ comments: RawComment[]; blockTexts: Record<string, string> }> {
   const comments: RawComment[] = [];
   const blockTexts: Record<string, string> = {};
@@ -141,7 +146,7 @@ async function fetchOfficialComments(
           start_cursor: cursor,
           page_size: 100,
         })
-      );
+      , { silent });
 
       for (const block of res.results) {
         const b = block as any;
@@ -161,7 +166,7 @@ async function fetchOfficialComments(
                 block_id: b.id,
                 start_cursor: commentCursor,
               })
-            );
+            , { silent });
             for (const c of cRes.results as any[]) {
               comments.push({
                 blockId: b.id,
@@ -313,6 +318,7 @@ export async function fetchInlineComments({
   apiKey,
   tokenV2,
   includeResolved = false,
+  silent = false,
 }: FetchOptions): Promise<InlineCommentResult> {
   if (!pageId) throw new Error('pageId is required');
   if (!apiKey) throw new Error('apiKey is required');
@@ -320,9 +326,9 @@ export async function fetchInlineComments({
   const notion = new Client({ auth: apiKey });
 
   const [{ comments: rawComments, blockTexts }, discussionMap] = await Promise.all([
-    fetchOfficialComments(notion, pageId),
+    fetchOfficialComments(notion, pageId, silent),
     fetchDiscussionData(pageId, { token: tokenV2 }).catch(err => {
-      console.warn(`[notion-inline-comments] Failed to fetch discussion data: ${err.message}`);
+      if (!silent) console.warn(`[notion-inline-comments] Failed to fetch discussion data: ${err.message}`);
       return {} as Record<string, DiscussionMeta>;
     }),
   ]);
@@ -338,6 +344,7 @@ export async function fetchFromDatabase({
   apiKey,
   tokenV2,
   includeResolved = false,
+  silent = false,
   limit,
 }: DatabaseFetchOptions): Promise<DatabaseResult> {
   if (!databaseId) throw new Error('databaseId is required');
@@ -356,7 +363,7 @@ export async function fetchFromDatabase({
         start_cursor: cursor,
         page_size: 100,
       })
-    );
+    , { silent });
 
     for (const page of res.results as any[]) {
       // Extract title from properties
@@ -386,6 +393,7 @@ export async function fetchFromDatabase({
         apiKey,
         tokenV2,
         includeResolved,
+        silent,
       });
 
       if (result.total > 0) {
@@ -394,7 +402,7 @@ export async function fetchFromDatabase({
         totalMapped += result.mapped;
       }
     } catch (err: any) {
-      console.warn(`[notion-inline-comments] Failed to scan page "${page.title}": ${err.message}`);
+      if (!silent) console.warn(`[notion-inline-comments] Failed to scan page "${page.title}": ${err.message}`);
     }
   }
 

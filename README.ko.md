@@ -124,6 +124,7 @@ npx notion-inline-comments <db-id> --database --api-key secret_xxx
 | `apiKey` | ✅ | Integration 토큰 |
 | `tokenV2` | | 브라우저 쿠키 (비공개 페이지용) |
 | `includeResolved` | | 해결된 댓글 포함 (기본: `false`) |
+| `silent` | | 콘솔 경고 로그 끄기 (기본: `false`) |
 
 ### `fetchFromDatabase(options)`
 
@@ -133,6 +134,7 @@ npx notion-inline-comments <db-id> --database --api-key secret_xxx
 | `apiKey` | ✅ | Integration 토큰 |
 | `tokenV2` | | 브라우저 쿠키 |
 | `limit` | | 최대 스캔 페이지 수 |
+| `silent` | | 콘솔 경고 로그 끄기 |
 
 ### `InlineComment`
 
