@@ -31,31 +31,53 @@ When you highlight text in Notion and add a comment, Notion knows *exactly* whic
 
 ---
 
+## Why Two APIs?
+
+Notion has two separate APIs, and **each knows something the other doesn't**:
+
+| | Official API (`api.notion.com`) | Internal API (`notion.so/api/v3`) |
+|---|---|---|
+| Comment body | ✅ Full text | ❌ IDs only |
+| Author name | ✅ Display name | ❌ User ID only |
+| Selected text | ❌ **Not available** | ✅ `discussion.context` |
+| Highlight color | ❌ | ✅ |
+| Resolved status | ❌ | ✅ |
+
+The internal API is what the Notion web app uses to load pages. The library [`notion-client`](https://github.com/NotionX/react-notion-x) replicates this same request to access the raw data.
+
+**This package merges both**, using `discussionId` as the key:
+
+<div align="center">
+<img src="./assets/how-it-works.png" alt="3-step flow: Official API + Internal API → Merge" width="520" />
+</div>
+
+---
+
 ## Install
 
 ```bash
 npm install notion-inline-comments
 ```
 
-## Usage
+## Quick Start
 
 ```javascript
 import { fetchInlineComments } from 'notion-inline-comments';
 
-const { comments } = await fetchInlineComments({
+const { comments, discussions } = await fetchInlineComments({
   pageId: 'your-page-id',
   apiKey: 'secret_xxx',
 });
 
 comments.forEach(c => {
-  console.log(c.contextText);  // "design tokens"  ← highlighted text
-  console.log(c.text);         // "These define..." ← comment body
+  console.log(c.contextText);     // "design tokens"       ← highlighted text
+  console.log(c.text);            // "These define..."      ← comment body
+  console.log(c.highlightColor);  // "yellow_background"    ← Notion highlight
+  console.log(c.resolved);        // false                  ← resolved status
 });
 ```
 
 ### Real-World Use Case
-
-Render Notion comments as hover tooltips — each on the exact text they were attached to:
 
 <div align="center">
 <img src="./assets/demo-tooltip.png" alt="Hover tooltip on highlighted text" width="480" />
@@ -63,50 +85,67 @@ Render Notion comments as hover tooltips — each on the exact text they were at
 
 ---
 
-## How It Works
-
-<div align="center">
-<img src="./assets/how-it-works.png" alt="3-step flow: Official API + Internal API → Merge" width="560" />
-</div>
-
-<br />
-
-> The Notion web app uses an internal endpoint that returns `discussion` objects with a `context` field — the exact selected text. We merge this with official API data using `discussionId`.
-
----
-
 ## API
 
-### `fetchInlineComments({ pageId, apiKey, tokenV2? })`
+### `fetchInlineComments(options)`
 
 | Option | Required | Description |
 |--------|:--------:|-------------|
 | `pageId` | ✅ | Page ID from the Notion URL |
 | `apiKey` | ✅ | Integration token |
 | `tokenV2` | | Browser cookie (private pages only) |
+| `includeResolved` | | Include resolved comments (default: `false`) |
 
 **Returns:**
 
 ```typescript
 {
-  comments: [{
-    contextText: string | null,  // highlighted text
-    text: string,                // comment body
-    author: string,
-    blockId: string,
-    discussionId: string,
-    createdAt: string,
-  }],
+  comments: InlineComment[],     // flat list of all comments
+  discussions: Discussion[],     // grouped by thread
   mapped: number,
   total: number,
+}
+```
+
+**`InlineComment`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `contextText` | `string \| null` | Highlighted text |
+| `text` | `string` | Comment body |
+| `author` | `string` | Author name |
+| `highlightColor` | `string \| null` | e.g. `"yellow_background"` |
+| `resolved` | `boolean` | Whether the thread is resolved |
+| `blockId` | `string` | Block ID |
+| `discussionId` | `string` | Thread ID |
+| `commentId` | `string` | Individual comment ID |
+| `createdAt` | `string` | ISO 8601 |
+
+**`Discussion`** (thread view):
+
+```typescript
+{
+  discussionId: string,
+  contextText: string | null,
+  highlightColor: string | null,
+  resolved: boolean,
+  blockId: string,
+  comments: [                     // all replies in this thread
+    { commentId, text, author, createdAt }
+  ],
 }
 ```
 
 ### Helpers
 
 ```javascript
-groupByBlock(comments);    // { blockId: [comments] }
-groupByContext(comments);  // Map { "text" => [comments] }
+import {
+  groupByBlock,         // { blockId: [comments] }
+  groupByContext,        // Map { "text" => [comments] }
+  groupByHighlight,      // { "yellow_background": [comments], "none": [...] }
+  filterResolved,        // only resolved
+  filterUnresolved,      // only unresolved
+} from 'notion-inline-comments';
 ```
 
 ---

@@ -15,9 +15,6 @@ import { Client } from '@notionhq/client';
 
 /**
  * 페이지의 모든 블록을 순회하며 댓글을 수집합니다.
- * @param {Client} notion - Notion 공식 API 클라이언트
- * @param {string} pageId - 페이지 ID
- * @returns {Promise<Array>} 댓글 목록
  */
 async function fetchOfficialComments(notion, pageId) {
   const comments = [];
@@ -32,7 +29,6 @@ async function fetchOfficialComments(notion, pageId) {
       });
 
       for (const block of res.results) {
-        // 각 블록의 댓글 조회
         try {
           let commentCursor;
           do {
@@ -44,6 +40,7 @@ async function fetchOfficialComments(notion, pageId) {
               comments.push({
                 blockId: block.id,
                 discussionId: c.discussion_id,
+                commentId: c.id,
                 text: c.rich_text?.map(rt => rt.plain_text).join('') || '',
                 author: c.created_by?.name || '',
                 createdAt: c.created_time,
@@ -55,7 +52,6 @@ async function fetchOfficialComments(notion, pageId) {
           // 댓글 조회 실패 시 무시
         }
 
-        // 하위 블록 재귀
         if (block.has_children) {
           await walkBlocks(block.id);
         }
@@ -69,16 +65,12 @@ async function fetchOfficialComments(notion, pageId) {
   return comments;
 }
 
-// ─── Unofficial API: discussion context ───────────────
+// ─── Unofficial API: discussion 전체 데이터 ──────────────
 
 /**
- * 비공식 API를 통해 각 discussion의 context(선택된 텍스트)를 가져옵니다.
- * @param {string} pageId - 페이지 ID
- * @param {object} [options] - 옵션
- * @param {string} [options.token] - token_v2 (비공개 페이지용)
- * @returns {Promise<Object>} discussionId → contextText 매핑
+ * 비공식 API를 통해 각 discussion의 전체 메타데이터를 가져옵니다.
  */
-async function fetchDiscussionContexts(pageId, options = {}) {
+async function fetchDiscussionData(pageId, options = {}) {
   const { NotionAPI } = await import('notion-client');
   const apiOptions = {};
   if (options.token) {
@@ -93,8 +85,30 @@ async function fetchDiscussionContexts(pageId, options = {}) {
   const map = {};
   for (const d of Object.values(discussions)) {
     const v = d.value?.value;
-    if (!v?.context || !v.id) continue;
-    map[v.id] = v.context.map(c => c[0]).join('');
+    if (!v?.id) continue;
+
+    // context 텍스트 추출
+    const contextText = v.context
+      ? v.context.map(c => c[0]).join('')
+      : null;
+
+    // 하이라이트 색상 추출 (annotation "h" = highlight)
+    let highlightColor = null;
+    if (v.context?.[0]?.[1]) {
+      for (const ann of v.context[0][1]) {
+        if (ann[0] === 'h') {
+          highlightColor = ann[1]; // e.g. "yellow_background"
+        }
+      }
+    }
+
+    map[v.id] = {
+      contextText,
+      highlightColor,
+      resolved: v.resolved || false,
+      commentIds: v.comments || [],
+      parentBlockId: v.parent_id || null,
+    };
   }
 
   return map;
@@ -108,7 +122,8 @@ async function fetchDiscussionContexts(pageId, options = {}) {
  * @param {Object} options
  * @param {string} options.pageId - 노션 페이지 ID
  * @param {string} options.apiKey - 노션 공식 API 키 (Integration token)
- * @param {string} [options.tokenV2] - 노션 브라우저 token_v2 (비공개 페이지용, 보통 불필요)
+ * @param {string} [options.tokenV2] - 노션 브라우저 token_v2 (비공개 페이지용)
+ * @param {boolean} [options.includeResolved=false] - 해결된 댓글도 포함할지
  * @returns {Promise<InlineCommentResult>}
  * 
  * @example
@@ -126,6 +141,8 @@ async function fetchDiscussionContexts(pageId, options = {}) {
  * //     contextText: "design tokens",
  * //     text: "These define the visual foundation...",
  * //     author: "John",
+ * //     highlightColor: "yellow_background",
+ * //     resolved: false,
  * //     blockId: "abc123-...",
  * //     discussionId: "def456-...",
  * //   },
@@ -133,7 +150,7 @@ async function fetchDiscussionContexts(pageId, options = {}) {
  * // ]
  * ```
  */
-export async function fetchInlineComments({ pageId, apiKey, tokenV2 }) {
+export async function fetchInlineComments({ pageId, apiKey, tokenV2, includeResolved = false }) {
   if (!pageId) throw new Error('pageId is required');
   if (!apiKey) throw new Error('apiKey is required');
 
@@ -143,49 +160,72 @@ export async function fetchInlineComments({ pageId, apiKey, tokenV2 }) {
   const rawComments = await fetchOfficialComments(notion, pageId);
 
   if (rawComments.length === 0) {
-    return { comments: [], mapped: 0, total: 0 };
+    return { comments: [], discussions: [], mapped: 0, total: 0 };
   }
 
-  // 2. 비공식 API로 discussion context 수집
-  let contextMap = {};
+  // 2. 비공식 API로 discussion 전체 데이터 수집
+  let discussionMap = {};
   try {
-    contextMap = await fetchDiscussionContexts(pageId, { token: tokenV2 });
+    discussionMap = await fetchDiscussionData(pageId, { token: tokenV2 });
   } catch (err) {
-    // 비공식 API 실패 시 경고만 — 댓글 내용은 여전히 반환
-    console.warn(`[notion-inline-comments] Discussion context fetch failed: ${err.message}`);
+    console.warn(`[notion-inline-comments] Discussion data fetch failed: ${err.message}`);
   }
 
   // 3. discussionId로 합치기
-  const comments = rawComments.map(c => ({
-    contextText: contextMap[c.discussionId] || null,
-    text: c.text,
-    author: c.author,
-    blockId: c.blockId,
-    discussionId: c.discussionId,
-    createdAt: c.createdAt,
-  }));
+  const comments = rawComments.map(c => {
+    const disc = discussionMap[c.discussionId] || {};
+    return {
+      contextText: disc.contextText || null,
+      text: c.text,
+      author: c.author,
+      highlightColor: disc.highlightColor || null,
+      resolved: disc.resolved || false,
+      blockId: c.blockId,
+      discussionId: c.discussionId,
+      commentId: c.commentId,
+      createdAt: c.createdAt,
+    };
+  });
 
-  const mapped = comments.filter(c => c.contextText !== null).length;
+  // resolved 필터링
+  const filtered = includeResolved
+    ? comments
+    : comments.filter(c => !c.resolved);
+
+  const mapped = filtered.filter(c => c.contextText !== null).length;
+
+  // 4. discussion 단위로 그룹핑 (스레드)
+  const threadMap = {};
+  for (const c of filtered) {
+    if (!threadMap[c.discussionId]) {
+      threadMap[c.discussionId] = {
+        discussionId: c.discussionId,
+        contextText: c.contextText,
+        highlightColor: c.highlightColor,
+        resolved: c.resolved,
+        blockId: c.blockId,
+        comments: [],
+      };
+    }
+    threadMap[c.discussionId].comments.push({
+      commentId: c.commentId,
+      text: c.text,
+      author: c.author,
+      createdAt: c.createdAt,
+    });
+  }
+  const discussions = Object.values(threadMap);
 
   return {
-    comments,
-    mapped,    // context가 매핑된 댓글 수
-    total: comments.length,
+    comments: filtered,
+    discussions,   // 스레드 단위로 그룹핑된 데이터
+    mapped,
+    total: filtered.length,
   };
 }
 
 /**
  * 댓글 목록을 blockId별로 그룹핑합니다.
- * 
- * @param {Array} comments - fetchInlineComments의 결과.comments
- * @returns {Object} blockId → comments[] 매핑
- * 
- * @example
- * ```javascript
- * const result = await fetchInlineComments({ ... });
- * const byBlock = groupByBlock(result.comments);
- * // { "block-id-1": [...], "block-id-2": [...] }
- * ```
  */
 export function groupByBlock(comments) {
   const map = {};
@@ -199,10 +239,6 @@ export function groupByBlock(comments) {
 
 /**
  * 댓글 목록을 contextText별로 그룹핑합니다.
- * (같은 텍스트에 여러 댓글이 달린 경우)
- * 
- * @param {Array} comments - fetchInlineComments의 결과.comments
- * @returns {Map} contextText → comments[] 매핑
  */
 export function groupByContext(comments) {
   const map = new Map();
@@ -210,6 +246,33 @@ export function groupByContext(comments) {
     if (!c.contextText) continue;
     if (!map.has(c.contextText)) map.set(c.contextText, []);
     map.get(c.contextText).push(c);
+  }
+  return map;
+}
+
+/**
+ * 해결된 댓글만 필터링합니다.
+ */
+export function filterResolved(comments) {
+  return comments.filter(c => c.resolved);
+}
+
+/**
+ * 미해결 댓글만 필터링합니다.
+ */
+export function filterUnresolved(comments) {
+  return comments.filter(c => !c.resolved);
+}
+
+/**
+ * 하이라이트 색상별로 그룹핑합니다.
+ */
+export function groupByHighlight(comments) {
+  const map = {};
+  for (const c of comments) {
+    const color = c.highlightColor || 'none';
+    if (!map[color]) map[color] = [];
+    map[color].push(c);
   }
   return map;
 }
