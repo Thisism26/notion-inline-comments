@@ -6,6 +6,7 @@
 
 Extract inline comments with the exact text they were attached to.
 
+[![CI](https://github.com/Thisism26/notion-inline-comments/actions/workflows/ci.yml/badge.svg)](https://github.com/Thisism26/notion-inline-comments/actions)
 [![npm version](https://img.shields.io/npm/v/notion-inline-comments?color=cb3837&label=npm&logo=npm&logoColor=white)](https://www.npmjs.com/package/notion-inline-comments)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
@@ -43,8 +44,6 @@ Notion has two separate APIs, and **each knows something the other doesn't**:
 | Highlight color | ❌ | ✅ |
 | Resolved status | ❌ | ✅ |
 
-The internal API is what the Notion web app uses to load pages. The library [`notion-client`](https://github.com/NotionX/react-notion-x) replicates this same request to access the raw data.
-
 **This package merges both**, using `discussionId` as the key:
 
 <div align="center">
@@ -64,7 +63,7 @@ npm install notion-inline-comments
 ```javascript
 import { fetchInlineComments } from 'notion-inline-comments';
 
-const { comments, discussions } = await fetchInlineComments({
+const { comments } = await fetchInlineComments({
   pageId: 'your-page-id',
   apiKey: 'secret_xxx',
 });
@@ -72,9 +71,39 @@ const { comments, discussions } = await fetchInlineComments({
 comments.forEach(c => {
   console.log(c.contextText);     // "design tokens"       ← highlighted text
   console.log(c.text);            // "These define..."      ← comment body
-  console.log(c.highlightColor);  // "yellow_background"    ← Notion highlight
-  console.log(c.resolved);        // false                  ← resolved status
+  console.log(c.blockText);       // "The design tokens..." ← full block text
+  console.log(c.highlightColor);  // "yellow_background"
+  console.log(c.resolved);        // false
 });
+```
+
+### Scan an Entire Database
+
+```javascript
+import { fetchFromDatabase } from 'notion-inline-comments';
+
+const result = await fetchFromDatabase({
+  databaseId: 'your-db-id',
+  apiKey: 'secret_xxx',
+});
+
+console.log(`Scanned ${result.totalPages} pages, ${result.totalMapped} comments mapped`);
+result.pages.forEach(p => {
+  console.log(`${p.title}: ${p.result.total} comments`);
+});
+```
+
+### CLI
+
+```bash
+# Single page
+npx notion-inline-comments <page-id> --api-key secret_xxx
+
+# Export as CSV
+npx notion-inline-comments <page-id> --api-key secret_xxx --format csv > comments.csv
+
+# Scan database
+npx notion-inline-comments <db-id> --database --api-key secret_xxx
 ```
 
 ### Real-World Use Case
@@ -96,45 +125,29 @@ comments.forEach(c => {
 | `tokenV2` | | Browser cookie (private pages only) |
 | `includeResolved` | | Include resolved comments (default: `false`) |
 
-**Returns:**
+### `fetchFromDatabase(options)`
 
-```typescript
-{
-  comments: InlineComment[],     // flat list of all comments
-  discussions: Discussion[],     // grouped by thread
-  mapped: number,
-  total: number,
-}
-```
+| Option | Required | Description |
+|--------|:--------:|-------------|
+| `databaseId` | ✅ | Database ID |
+| `apiKey` | ✅ | Integration token |
+| `tokenV2` | | Browser cookie |
+| `limit` | | Max pages to scan |
 
-**`InlineComment`:**
+### `InlineComment`
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `contextText` | `string \| null` | Highlighted text |
 | `text` | `string` | Comment body |
 | `author` | `string` | Author name |
+| `blockText` | `string \| null` | Full block text |
 | `highlightColor` | `string \| null` | e.g. `"yellow_background"` |
-| `resolved` | `boolean` | Whether the thread is resolved |
+| `resolved` | `boolean` | Resolved status |
 | `blockId` | `string` | Block ID |
 | `discussionId` | `string` | Thread ID |
-| `commentId` | `string` | Individual comment ID |
+| `commentId` | `string` | Comment ID |
 | `createdAt` | `string` | ISO 8601 |
-
-**`Discussion`** (thread view):
-
-```typescript
-{
-  discussionId: string,
-  contextText: string | null,
-  highlightColor: string | null,
-  resolved: boolean,
-  blockId: string,
-  comments: [                     // all replies in this thread
-    { commentId, text, author, createdAt }
-  ],
-}
-```
 
 ### Helpers
 
@@ -142,9 +155,11 @@ comments.forEach(c => {
 import {
   groupByBlock,         // { blockId: [comments] }
   groupByContext,        // Map { "text" => [comments] }
-  groupByHighlight,      // { "yellow_background": [comments], "none": [...] }
-  filterResolved,        // only resolved
-  filterUnresolved,      // only unresolved
+  groupByHighlight,      // { "yellow_background": [...] }
+  filterResolved,        // resolved only
+  filterUnresolved,      // unresolved only
+  toCSV,                 // CSV string
+  toMarkdown,            // Markdown string
 } from 'notion-inline-comments';
 ```
 

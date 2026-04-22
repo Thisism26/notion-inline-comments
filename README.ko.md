@@ -6,6 +6,7 @@
 
 인라인 댓글을 정확히 어떤 텍스트에 달렸는지와 함께 추출합니다.
 
+[![CI](https://github.com/Thisism26/notion-inline-comments/actions/workflows/ci.yml/badge.svg)](https://github.com/Thisism26/notion-inline-comments/actions)
 [![npm version](https://img.shields.io/npm/v/notion-inline-comments?color=cb3837&label=npm&logo=npm&logoColor=white)](https://www.npmjs.com/package/notion-inline-comments)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
@@ -43,8 +44,6 @@
 | 하이라이트 색상 | ❌ | ✅ |
 | 해결 상태 | ❌ | ✅ |
 
-내부 API는 노션 웹앱이 페이지를 로딩할 때 사용하는 것입니다. [`notion-client`](https://github.com/NotionX/react-notion-x) 라이브러리가 이 요청을 그대로 재현합니다.
-
 **이 패키지는 둘을 합칩니다** — `discussionId`를 키로:
 
 <div align="center">
@@ -64,7 +63,7 @@ npm install notion-inline-comments
 ```javascript
 import { fetchInlineComments } from 'notion-inline-comments';
 
-const { comments, discussions } = await fetchInlineComments({
+const { comments } = await fetchInlineComments({
   pageId: '페이지-ID',
   apiKey: 'secret_xxx',
 });
@@ -72,9 +71,39 @@ const { comments, discussions } = await fetchInlineComments({
 comments.forEach(c => {
   console.log(c.contextText);     // "디자인 토큰"          ← 선택 텍스트
   console.log(c.text);            // "이것은..."            ← 댓글 내용
-  console.log(c.highlightColor);  // "yellow_background"    ← 하이라이트 색상
-  console.log(c.resolved);        // false                  ← 해결 상태
+  console.log(c.blockText);       // "디자인 토큰은..."     ← 전체 블록 텍스트
+  console.log(c.highlightColor);  // "yellow_background"
+  console.log(c.resolved);        // false
 });
+```
+
+### 데이터베이스 일괄 스캔
+
+```javascript
+import { fetchFromDatabase } from 'notion-inline-comments';
+
+const result = await fetchFromDatabase({
+  databaseId: 'DB-ID',
+  apiKey: 'secret_xxx',
+});
+
+console.log(`${result.totalPages}개 페이지 스캔, ${result.totalMapped}개 댓글 매핑`);
+result.pages.forEach(p => {
+  console.log(`${p.title}: ${p.result.total}개 댓글`);
+});
+```
+
+### CLI
+
+```bash
+# 단일 페이지
+npx notion-inline-comments <page-id> --api-key secret_xxx
+
+# CSV로 내보내기
+npx notion-inline-comments <page-id> --api-key secret_xxx --format csv > comments.csv
+
+# 데이터베이스 스캔
+npx notion-inline-comments <db-id> --database --api-key secret_xxx
 ```
 
 ### 실제 활용 예시
@@ -96,45 +125,29 @@ comments.forEach(c => {
 | `tokenV2` | | 브라우저 쿠키 (비공개 페이지용) |
 | `includeResolved` | | 해결된 댓글 포함 (기본: `false`) |
 
-**반환값:**
+### `fetchFromDatabase(options)`
 
-```typescript
-{
-  comments: InlineComment[],     // 전체 댓글 (flat)
-  discussions: Discussion[],     // 스레드 단위 그룹
-  mapped: number,
-  total: number,
-}
-```
+| 옵션 | 필수 | 설명 |
+|------|:----:|------|
+| `databaseId` | ✅ | 데이터베이스 ID |
+| `apiKey` | ✅ | Integration 토큰 |
+| `tokenV2` | | 브라우저 쿠키 |
+| `limit` | | 최대 스캔 페이지 수 |
 
-**`InlineComment`:**
+### `InlineComment`
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `contextText` | `string \| null` | 하이라이트한 텍스트 |
 | `text` | `string` | 댓글 내용 |
 | `author` | `string` | 작성자 |
+| `blockText` | `string \| null` | 전체 블록 텍스트 |
 | `highlightColor` | `string \| null` | 예: `"yellow_background"` |
 | `resolved` | `boolean` | 해결 여부 |
 | `blockId` | `string` | 블록 ID |
 | `discussionId` | `string` | 스레드 ID |
-| `commentId` | `string` | 개별 댓글 ID |
+| `commentId` | `string` | 댓글 ID |
 | `createdAt` | `string` | ISO 8601 |
-
-**`Discussion`** (스레드 뷰):
-
-```typescript
-{
-  discussionId: string,
-  contextText: string | null,
-  highlightColor: string | null,
-  resolved: boolean,
-  blockId: string,
-  comments: [                     // 이 스레드의 모든 답글
-    { commentId, text, author, createdAt }
-  ],
-}
-```
 
 ### 헬퍼 함수
 
@@ -142,9 +155,11 @@ comments.forEach(c => {
 import {
   groupByBlock,         // { blockId: [comments] }
   groupByContext,        // Map { "텍스트" => [comments] }
-  groupByHighlight,      // { "yellow_background": [...], "none": [...] }
+  groupByHighlight,      // { "yellow_background": [...] }
   filterResolved,        // 해결된 것만
   filterUnresolved,      // 미해결만
+  toCSV,                 // CSV 문자열
+  toMarkdown,            // 마크다운 문자열
 } from 'notion-inline-comments';
 ```
 
