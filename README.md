@@ -1,3 +1,5 @@
+[🇰🇷 한국어](./README.ko.md)
+
 # notion-inline-comments
 
 > Extract Notion inline comments with **exact text mapping**.
@@ -55,6 +57,16 @@ Output:
 "responsive layout" → "Consider mobile-first breakpoints..."
 ```
 
+## How It Works
+
+```
+1. Official API  →  Comment text + discussionId
+2. Unofficial API (notion-client)  →  discussion.context (selected text)
+3. Merge by discussionId  →  exact 1:1 text ↔ comment mapping
+```
+
+The unofficial Notion API (`/api/v3/loadPageChunk`) returns a `discussion` object for each comment thread. This object contains a `context` field with the **exact text that was selected** when the comment was created — data the official API doesn't expose.
+
 ## API
 
 ### `fetchInlineComments(options)`
@@ -70,7 +82,7 @@ Returns `Promise<InlineCommentResult>`:
 ```typescript
 {
   comments: InlineComment[];  // All comments with text mapping
-  mapped: number;             // Comments with successful text mapping
+  mapped: number;             // Comments successfully mapped to text
   total: number;              // Total comment count
 }
 ```
@@ -83,50 +95,23 @@ Each `InlineComment`:
   text: string;               // Comment content
   author: string;             // Author name
   blockId: string;            // Block the comment was made on
-  discussionId: string;       // Discussion ID (links official ↔ unofficial API)
+  discussionId: string;       // Discussion ID
   createdAt: string;          // ISO 8601 timestamp
 }
 ```
 
 ### `groupByBlock(comments)`
 
-Group comments by `blockId`:
-
-```javascript
-import { fetchInlineComments, groupByBlock } from 'notion-inline-comments';
-
-const result = await fetchInlineComments({ ... });
-const byBlock = groupByBlock(result.comments);
-// { "block-id-1": [comment, comment], "block-id-2": [comment] }
-```
+Group comments by `blockId`.
 
 ### `groupByContext(comments)`
 
-Group comments by `contextText`:
-
-```javascript
-import { fetchInlineComments, groupByContext } from 'notion-inline-comments';
-
-const result = await fetchInlineComments({ ... });
-const byContext = groupByContext(result.comments);
-// Map { "design tokens" => [comment], "layout grid" => [comment] }
-```
-
-## How It Works
-
-```
-1. Official API  →  Comment text + discussionId
-2. Unofficial API (notion-client)  →  discussion.context (selected text)
-3. Merge by discussionId  →  "design tokens" = "These define the visual foundation..."
-```
-
-The unofficial Notion API (`/api/v3/loadPageChunk`) returns a `discussion` object for each comment thread. This object contains a `context` field with the **exact text that was selected** when the comment was created — data the official API doesn't expose.
+Group comments by `contextText` (useful when rendering tooltips per highlighted text).
 
 ## Requirements
 
 - Node.js >= 18
 - A Notion Integration with access to the target page
-- The page must be shared with the Integration
 
 ## License
 
