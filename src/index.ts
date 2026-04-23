@@ -252,7 +252,7 @@ async function fetchOfficialComments(
                 commentId: c.id,
                 text: c.rich_text?.map((rt: any) => rt.plain_text).join('') || '',
                 richText: segments,
-                author: c.created_by?.name || '',
+                author: c.display_name?.resolved_name || c.created_by?.name || c.created_by?.person?.email || '',
                 avatarUrl: c.created_by?.avatar_url || null,
                 createdAt: c.created_time,
               });
