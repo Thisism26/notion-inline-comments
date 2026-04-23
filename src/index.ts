@@ -6,16 +6,41 @@
  */
 
 import { Client } from '@notionhq/client';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 
 // ─── Types ─────────────────────────────────────────────
+
+/** A single rich text segment from Notion */
+export interface RichTextSegment {
+  type: 'text' | 'mention' | 'equation';
+  plain_text: string;
+  href: string | null;
+  annotations: {
+    bold: boolean;
+    italic: boolean;
+    strikethrough: boolean;
+    underline: boolean;
+    code: boolean;
+    color: string;
+  };
+  /** Present when type is 'mention' */
+  mention?: {
+    type: string;
+    [key: string]: any;
+  };
+}
 
 export interface InlineComment {
   /** The exact text the user highlighted */
   contextText: string | null;
-  /** Comment body */
+  /** Comment body (plain text) */
   text: string;
+  /** Rich text segments with links, mentions, and formatting */
+  richText: RichTextSegment[];
   /** Author display name */
   author: string;
+  /** Author avatar URL */
+  avatarUrl: string | null;
   /** Notion highlight color (e.g. "yellow_background") */
   highlightColor: string | null;
   /** Whether the discussion thread is resolved */
@@ -42,7 +67,9 @@ export interface DiscussionThread {
   comments: {
     commentId: string;
     text: string;
+    richText: RichTextSegment[];
     author: string;
+    avatarUrl: string | null;
     createdAt: string;
   }[];
 }
@@ -61,6 +88,8 @@ export interface FetchOptions {
   includeResolved?: boolean;
   /** Suppress console warnings */
   silent?: boolean;
+  /** Path to cache file (enables caching when set) */
+  cachePath?: string;
 }
 
 export interface DatabaseFetchOptions {
@@ -72,6 +101,8 @@ export interface DatabaseFetchOptions {
   silent?: boolean;
   /** Max pages to scan (default: all) */
   limit?: number;
+  /** Path to cache file (enables caching when set) */
+  cachePath?: string;
 }
 
 export interface DatabaseResult {
@@ -90,7 +121,9 @@ interface RawComment {
   discussionId: string;
   commentId: string;
   text: string;
+  richText: RichTextSegment[];
   author: string;
+  avatarUrl: string | null;
   createdAt: string;
 }
 
@@ -100,6 +133,39 @@ interface DiscussionMeta {
   resolved: boolean;
   commentIds: string[];
   parentBlockId: string | null;
+}
+
+// ─── Cache ─────────────────────────────────────────────
+
+interface CacheEntry {
+  lastEditedTime: string;
+  result: InlineCommentResult;
+}
+
+interface CacheStore {
+  version: number;
+  entries: Record<string, CacheEntry>;
+}
+
+function loadCache(cachePath: string): CacheStore {
+  try {
+    if (existsSync(cachePath)) {
+      const raw = readFileSync(cachePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed.version === 1) return parsed;
+    }
+  } catch {
+    // Corrupt cache, start fresh
+  }
+  return { version: 1, entries: {} };
+}
+
+function saveCache(cachePath: string, cache: CacheStore): void {
+  try {
+    writeFileSync(cachePath, JSON.stringify(cache), 'utf-8');
+  } catch {
+    // Non-critical, ignore write failures
+  }
 }
 
 // ─── Rate-limited fetch wrapper ────────────────────────
@@ -168,12 +234,26 @@ async function fetchOfficialComments(
               })
             , { silent });
             for (const c of cRes.results as any[]) {
+              // Extract rich text segments preserving links, mentions, formatting
+              const segments: RichTextSegment[] = (c.rich_text || []).map((rt: any) => ({
+                type: rt.type || 'text',
+                plain_text: rt.plain_text || '',
+                href: rt.href || null,
+                annotations: rt.annotations || {
+                  bold: false, italic: false, strikethrough: false,
+                  underline: false, code: false, color: 'default',
+                },
+                ...(rt.type === 'mention' && rt.mention ? { mention: rt.mention } : {}),
+              }));
+
               comments.push({
                 blockId: b.id,
                 discussionId: c.discussion_id,
                 commentId: c.id,
                 text: c.rich_text?.map((rt: any) => rt.plain_text).join('') || '',
+                richText: segments,
                 author: c.created_by?.name || '',
+                avatarUrl: c.created_by?.avatar_url || null,
                 createdAt: c.created_time,
               });
             }
@@ -261,7 +341,9 @@ function mergeResults(
     return {
       contextText: disc.contextText || null,
       text: c.text,
+      richText: c.richText,
       author: c.author,
+      avatarUrl: c.avatarUrl,
       highlightColor: disc.highlightColor || null,
       resolved: disc.resolved || false,
       blockText: blockTexts[c.blockId] || null,
@@ -294,7 +376,9 @@ function mergeResults(
     threadMap[c.discussionId].comments.push({
       commentId: c.commentId,
       text: c.text,
+      richText: c.richText,
       author: c.author,
+      avatarUrl: c.avatarUrl,
       createdAt: c.createdAt,
     });
   }
@@ -319,10 +403,44 @@ export async function fetchInlineComments({
   tokenV2,
   includeResolved = false,
   silent = false,
+  cachePath,
 }: FetchOptions): Promise<InlineCommentResult> {
   if (!pageId) throw new Error('pageId is required');
   if (!apiKey) throw new Error('apiKey is required');
 
+  // Check cache if enabled
+  if (cachePath) {
+    const notion = new Client({ auth: apiKey });
+    try {
+      const pageInfo = await withRetry(() => notion.pages.retrieve({ page_id: pageId }), { silent });
+      const lastEdited = (pageInfo as any).last_edited_time;
+      const cache = loadCache(cachePath);
+      const cached = cache.entries[pageId];
+
+      if (cached && cached.lastEditedTime === lastEdited) {
+        return cached.result;
+      }
+
+      // Fetch fresh data
+      const result = await _fetchInlineCommentsUncached({ pageId, apiKey, tokenV2, includeResolved, silent });
+
+      // Save to cache
+      cache.entries[pageId] = { lastEditedTime: lastEdited, result };
+      saveCache(cachePath, cache);
+
+      return result;
+    } catch (err: any) {
+      if (!silent) console.warn(`[notion-inline-comments] Cache check failed, fetching fresh: ${err.message}`);
+    }
+  }
+
+  return _fetchInlineCommentsUncached({ pageId, apiKey, tokenV2, includeResolved, silent });
+}
+
+/** Internal uncached fetch */
+async function _fetchInlineCommentsUncached({
+  pageId, apiKey, tokenV2, includeResolved = false, silent = false,
+}: Omit<FetchOptions, 'cachePath'>): Promise<InlineCommentResult> {
   const notion = new Client({ auth: apiKey });
 
   const [{ comments: rawComments, blockTexts }, discussionMap] = await Promise.all([
@@ -338,6 +456,7 @@ export async function fetchInlineComments({
 
 /**
  * Fetches inline comments from ALL pages in a Notion database.
+ * When cachePath is set, only re-fetches pages that have been modified.
  */
 export async function fetchFromDatabase({
   databaseId,
@@ -346,14 +465,16 @@ export async function fetchFromDatabase({
   includeResolved = false,
   silent = false,
   limit,
+  cachePath,
 }: DatabaseFetchOptions): Promise<DatabaseResult> {
   if (!databaseId) throw new Error('databaseId is required');
   if (!apiKey) throw new Error('apiKey is required');
 
   const notion = new Client({ auth: apiKey });
+  const cache = cachePath ? loadCache(cachePath) : null;
 
   // Collect all page IDs from the database
-  const pages: { id: string; title: string }[] = [];
+  const pages: { id: string; title: string; lastEdited: string }[] = [];
   let cursor: string | undefined;
 
   do {
@@ -366,13 +487,16 @@ export async function fetchFromDatabase({
     , { silent });
 
     for (const page of res.results as any[]) {
-      // Extract title from properties
       const titleProp = Object.values(page.properties || {}).find(
         (p: any) => p.type === 'title'
       ) as any;
       const title = titleProp?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
 
-      pages.push({ id: page.id, title });
+      pages.push({
+        id: page.id,
+        title,
+        lastEdited: page.last_edited_time || '',
+      });
 
       if (limit && pages.length >= limit) break;
     }
@@ -381,20 +505,38 @@ export async function fetchFromDatabase({
     if (limit && pages.length >= limit) break;
   } while (cursor);
 
-  // Fetch comments for each page
+  // Fetch comments for each page (skip unchanged if cached)
   const results: DatabaseResult['pages'] = [];
   let totalComments = 0;
   let totalMapped = 0;
 
   for (const page of pages) {
     try {
-      const result = await fetchInlineComments({
+      // Check cache for this page
+      if (cache) {
+        const cached = cache.entries[page.id];
+        if (cached && cached.lastEditedTime === page.lastEdited) {
+          if (cached.result.total > 0) {
+            results.push({ pageId: page.id, title: page.title, result: cached.result });
+            totalComments += cached.result.total;
+            totalMapped += cached.result.mapped;
+          }
+          continue; // Skip API call
+        }
+      }
+
+      const result = await _fetchInlineCommentsUncached({
         pageId: page.id,
         apiKey,
         tokenV2,
         includeResolved,
         silent,
       });
+
+      // Update cache
+      if (cache) {
+        cache.entries[page.id] = { lastEditedTime: page.lastEdited, result };
+      }
 
       if (result.total > 0) {
         results.push({ pageId: page.id, title: page.title, result });
@@ -404,6 +546,11 @@ export async function fetchFromDatabase({
     } catch (err: any) {
       if (!silent) console.warn(`[notion-inline-comments] Failed to scan page "${page.title}": ${err.message}`);
     }
+  }
+
+  // Persist cache
+  if (cache && cachePath) {
+    saveCache(cachePath, cache);
   }
 
   return {

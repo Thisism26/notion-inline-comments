@@ -125,6 +125,7 @@ npx notion-inline-comments <db-id> --database --api-key secret_xxx
 | `tokenV2` | | 브라우저 쿠키 (비공개 페이지용) |
 | `includeResolved` | | 해결된 댓글 포함 (기본: `false`) |
 | `silent` | | 콘솔 경고 로그 끄기 (기본: `false`) |
+| `cachePath` | | 캐시 파일 경로 (예: `.nic-cache.json`) |
 
 ### `fetchFromDatabase(options)`
 
@@ -135,14 +136,17 @@ npx notion-inline-comments <db-id> --database --api-key secret_xxx
 | `tokenV2` | | 브라우저 쿠키 |
 | `limit` | | 최대 스캔 페이지 수 |
 | `silent` | | 콘솔 경고 로그 끄기 |
+| `cachePath` | | 캐시 파일 경로 |
 
 ### `InlineComment`
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `contextText` | `string \| null` | 하이라이트한 텍스트 |
-| `text` | `string` | 댓글 내용 |
+| `text` | `string` | 댓글 내용 (순수 텍스트) |
+| `richText` | `RichTextSegment[]` | 링크, 멘션, 서식 포함 리치 텍스트 |
 | `author` | `string` | 작성자 |
+| `avatarUrl` | `string \| null` | 작성자 프로필 이미지 URL |
 | `blockText` | `string \| null` | 전체 블록 텍스트 |
 | `highlightColor` | `string \| null` | 예: `"yellow_background"` |
 | `resolved` | `boolean` | 해결 여부 |

@@ -1,6 +1,6 @@
 {
   "name": "notion-inline-comments",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Extract Notion inline comments with exact text mapping. Know exactly which text was selected when a comment was made.",
   "type": "module",
   "main": "./dist/index.js",

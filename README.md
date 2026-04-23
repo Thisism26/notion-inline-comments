@@ -125,6 +125,7 @@ npx notion-inline-comments <db-id> --database --api-key secret_xxx
 | `tokenV2` | | Browser cookie (private pages only) |
 | `includeResolved` | | Include resolved comments (default: `false`) |
 | `silent` | | Suppress console warnings (default: `false`) |
+| `cachePath` | | File path for caching (e.g. `.nic-cache.json`) |
 
 ### `fetchFromDatabase(options)`
 
@@ -135,14 +136,17 @@ npx notion-inline-comments <db-id> --database --api-key secret_xxx
 | `tokenV2` | | Browser cookie |
 | `limit` | | Max pages to scan |
 | `silent` | | Suppress console warnings |
+| `cachePath` | | File path for caching |
 
 ### `InlineComment`
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `contextText` | `string \| null` | Highlighted text |
-| `text` | `string` | Comment body |
+| `text` | `string` | Comment body (plain text) |
+| `richText` | `RichTextSegment[]` | Rich text with links, mentions, formatting |
 | `author` | `string` | Author name |
+| `avatarUrl` | `string \| null` | Author profile image URL |
 | `blockText` | `string \| null` | Full block text |
 | `highlightColor` | `string \| null` | e.g. `"yellow_background"` |
 | `resolved` | `boolean` | Resolved status |

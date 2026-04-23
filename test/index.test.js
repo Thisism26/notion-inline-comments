@@ -18,13 +18,21 @@ import {
 
 // ─── Mock data ────────────────────────────────────────
 
+const mockRichText = [
+  { type: 'text', plain_text: 'Check ', href: null, annotations: { bold: false, italic: false, strikethrough: false, underline: false, code: false, color: 'default' } },
+  { type: 'mention', plain_text: '@Troy', href: null, annotations: { bold: false, italic: false, strikethrough: false, underline: false, code: false, color: 'default' }, mention: { type: 'user', user: { id: 'user-1' } } },
+  { type: 'text', plain_text: ' please', href: 'https://example.com', annotations: { bold: true, italic: false, strikethrough: false, underline: false, code: false, color: 'default' } },
+];
+
 const mockRawComments = [
   {
     blockId: 'block-1',
     discussionId: 'disc-1',
     commentId: 'comment-1',
     text: 'This is a key design decision.',
+    richText: mockRichText,
     author: 'Alice',
+    avatarUrl: 'https://avatar.example.com/alice.png',
     createdAt: '2024-01-15T10:00:00Z',
   },
   {
@@ -32,7 +40,9 @@ const mockRawComments = [
     discussionId: 'disc-2',
     commentId: 'comment-2',
     text: 'Consider using warmer tones.',
+    richText: [{ type: 'text', plain_text: 'Consider using warmer tones.', href: null, annotations: { bold: false, italic: false, strikethrough: false, underline: false, code: false, color: 'default' } }],
     author: 'Bob',
+    avatarUrl: null,
     createdAt: '2024-01-15T11:00:00Z',
   },
   {
@@ -40,7 +50,9 @@ const mockRawComments = [
     discussionId: 'disc-3',
     commentId: 'comment-3',
     text: 'Resolved issue.',
+    richText: [{ type: 'text', plain_text: 'Resolved issue.', href: null, annotations: { bold: false, italic: false, strikethrough: false, underline: false, code: false, color: 'default' } }],
     author: 'Charlie',
+    avatarUrl: 'https://avatar.example.com/charlie.png',
     createdAt: '2024-01-15T12:00:00Z',
   },
 ];
@@ -97,6 +109,21 @@ describe('mergeResults', () => {
     assert.equal(result.comments[2].highlightColor, null);
   });
 
+  it('preserves avatarUrl', () => {
+    const result = _mergeResults(mockRawComments, mockDiscussionMap, mockBlockTexts, true);
+    assert.equal(result.comments[0].avatarUrl, 'https://avatar.example.com/alice.png');
+    assert.equal(result.comments[1].avatarUrl, null);
+  });
+
+  it('preserves richText segments', () => {
+    const result = _mergeResults(mockRawComments, mockDiscussionMap, mockBlockTexts, true);
+    assert.equal(result.comments[0].richText.length, 3);
+    assert.equal(result.comments[0].richText[1].type, 'mention');
+    assert.equal(result.comments[0].richText[1].plain_text, '@Troy');
+    assert.equal(result.comments[0].richText[2].href, 'https://example.com');
+    assert.equal(result.comments[0].richText[2].annotations.bold, true);
+  });
+
   it('excludes resolved by default', () => {
     const result = _mergeResults(mockRawComments, mockDiscussionMap, mockBlockTexts, false);
     assert.equal(result.total, 2);
@@ -114,10 +141,11 @@ describe('mergeResults', () => {
     assert.equal(result.mapped, 3);
   });
 
-  it('groups discussions correctly', () => {
+  it('groups discussions with richText and avatarUrl', () => {
     const result = _mergeResults(mockRawComments, mockDiscussionMap, mockBlockTexts, true);
     assert.equal(result.discussions.length, 3);
-    assert.equal(result.discussions[0].comments.length, 1);
+    assert.equal(result.discussions[0].comments[0].avatarUrl, 'https://avatar.example.com/alice.png');
+    assert.equal(result.discussions[0].comments[0].richText.length, 3);
   });
 
   it('handles empty input', () => {
@@ -184,10 +212,11 @@ describe('toCSV', () => {
 
   it('escapes quotes in CSV', () => {
     const comments = [{
-      ...mockRawComments[0],
       contextText: 'with "quotes"',
       text: 'has "special" chars',
+      richText: [],
       author: 'Alice',
+      avatarUrl: null,
       highlightColor: null,
       resolved: false,
       blockText: null,
